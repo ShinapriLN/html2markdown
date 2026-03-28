@@ -11,6 +11,7 @@ const NOISE_TAGS = new Set([
   "mat-icon",
   "sup",
   "button",
+  "svg",
 ]);
 
 // Tags that are just transparent wrappers
@@ -70,11 +71,20 @@ function processNode(node: Node): string {
     return "";
   }
 
-  const children = processChildren(el);
+  // --- LaTeX detection (BEFORE processing children) ---
 
-  // --- LaTeX detection ---
-  // KaTeX rendered elements
-  if (el.classList.contains("katex") || el.classList.contains("katex-display")) {
+  // Gemini uses <span class="math-inline" data-math="..."> and <span class="math-display" data-math="...">
+  const dataMath = el.getAttribute("data-math");
+  if (dataMath !== null && (el.classList.contains("math-inline") || el.classList.contains("math-display"))) {
+    if (el.classList.contains("math-display")) {
+      return `\n\n$$\n${dataMath}\n$$\n\n`;
+    }
+    return `$${dataMath}$`;
+  }
+
+  // KaTeX rendered containers — skip entirely (we already extracted from data-math above)
+  if (el.classList.contains("katex") || el.classList.contains("katex-html") || el.classList.contains("katex-display")) {
+    // If there's an annotation with the TeX source, use it as fallback
     const annotation = el.querySelector('annotation[encoding="application/x-tex"]');
     if (annotation) {
       const tex = annotation.textContent || "";
@@ -83,6 +93,8 @@ function processNode(node: Node): string {
       }
       return `$${tex}$`;
     }
+    // Otherwise skip — the parent math-inline/math-display already handled it
+    return "";
   }
 
   // MathJax elements
@@ -96,6 +108,13 @@ function processNode(node: Node): string {
       return `$${tex}$`;
     }
   }
+
+  // Skip KaTeX SVG images (the inline data:image/svg+xml used for square roots etc.)
+  if (tag === "img" && el.classList.contains("katex-svg")) {
+    return "";
+  }
+
+  const children = processChildren(el);
 
   // Wrapper tags: just pass through children
   if (WRAPPER_TAGS.has(tag) && !el.classList.contains("horizontal-scroll-wrapper")) {
