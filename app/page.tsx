@@ -1,6 +1,11 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import remarkGfm from "remark-gfm";
+import "katex/dist/katex.min.css";
 
 // Tags from Gemini's Angular framework that carry no content value
 const NOISE_TAGS = new Set([
@@ -235,6 +240,8 @@ function processListItems(listEl: HTMLElement, ordered: boolean): string {
     if (el.tagName.toLowerCase() !== "li") return;
 
     const content = processChildren(el).trim();
+    if (!content) return; // Skip empty list items
+
     if (ordered) {
       items.push(`${index}. ${content}`);
       index++;
@@ -339,7 +346,7 @@ export default function Home() {
   const [inputHtml, setInputHtml] = useState("");
   const [outputMd, setOutputMd] = useState("");
   const [copied, setCopied] = useState(false);
-  const outputRef = useRef<HTMLTextAreaElement>(null);
+  const [viewMode, setViewMode] = useState<"preview" | "raw">("preview");
 
   const convert = useCallback(() => {
     if (!inputHtml.trim()) {
@@ -375,13 +382,15 @@ export default function Home() {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback
-      if (outputRef.current) {
-        outputRef.current.select();
-        document.execCommand("copy");
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      }
+      // Fallback: create a temporary textarea to copy
+      const ta = document.createElement("textarea");
+      ta.value = outputMd;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   }, [outputMd]);
 
@@ -392,9 +401,9 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#0a0a0f] text-zinc-100">
+    <div className="flex flex-col h-dvh bg-[#0a0a0f] text-zinc-100">
       {/* Header */}
-      <header className="border-b border-zinc-800/60 bg-[#0d0d14]/80 backdrop-blur-xl sticky top-0 z-10">
+      <header className="border-b border-zinc-800/60 bg-[#0d0d14]/80 backdrop-blur-xl shrink-0 z-10">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-500 to-indigo-600 flex items-center justify-center text-sm font-bold">
@@ -411,12 +420,12 @@ export default function Home() {
       </header>
 
       {/* Main content */}
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 flex flex-col gap-4">
+      <main className="flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 py-6 flex flex-col gap-4 min-h-0">
         {/* Two panels */}
         <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-0">
           {/* Input panel */}
           <div className="flex flex-col rounded-xl border border-zinc-800/60 bg-[#111118] overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/40">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/40 shrink-0">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full bg-emerald-400/80" />
                 <span className="text-sm font-medium text-zinc-300">
@@ -450,12 +459,31 @@ export default function Home() {
 
           {/* Output panel */}
           <div className="flex flex-col rounded-xl border border-zinc-800/60 bg-[#111118] overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/40">
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800/40 shrink-0">
+              <div className="flex items-center gap-3">
                 <div className="w-2 h-2 rounded-full bg-blue-400/80" />
-                <span className="text-sm font-medium text-zinc-300">
-                  Markdown Output
-                </span>
+                <div className="flex rounded-lg bg-zinc-800/60 p-0.5">
+                  <button
+                    onClick={() => setViewMode("preview")}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+                      viewMode === "preview"
+                        ? "bg-violet-600 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Preview
+                  </button>
+                  <button
+                    onClick={() => setViewMode("raw")}
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md transition-all ${
+                      viewMode === "raw"
+                        ? "bg-violet-600 text-white shadow-sm"
+                        : "text-zinc-400 hover:text-zinc-200"
+                    }`}
+                  >
+                    Raw
+                  </button>
+                </div>
               </div>
               <button
                 onClick={handleCopy}
@@ -468,17 +496,35 @@ export default function Home() {
                     : "bg-zinc-800/50 text-zinc-600 cursor-not-allowed"
                 }`}
               >
-                {copied ? "✓ Copied!" : "Copy"}
+                {copied ? "✓ Copied!" : "Copy Markdown"}
               </button>
             </div>
-            <textarea
-              ref={outputRef}
-              value={outputMd}
-              readOnly
-              placeholder="Converted markdown will appear here..."
-              className="flex-1 min-h-[300px] lg:min-h-0 bg-transparent px-4 py-3 text-sm font-mono text-zinc-300 placeholder:text-zinc-600 focus:outline-none resize-none"
-              spellCheck={false}
-            />
+            {viewMode === "preview" ? (
+              <div className="flex-1 min-h-[300px] lg:min-h-0 overflow-auto px-5 py-4">
+                {outputMd ? (
+                  <article className="prose prose-invert prose-sm max-w-none">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkMath, remarkGfm]}
+                      rehypePlugins={[rehypeKatex]}
+                    >
+                      {outputMd}
+                    </ReactMarkdown>
+                  </article>
+                ) : (
+                  <p className="text-sm text-zinc-600">
+                    Converted preview will appear here...
+                  </p>
+                )}
+              </div>
+            ) : (
+              <textarea
+                value={outputMd}
+                readOnly
+                placeholder="Converted markdown will appear here..."
+                className="flex-1 min-h-[300px] lg:min-h-0 bg-transparent px-4 py-3 text-sm font-mono text-zinc-300 placeholder:text-zinc-600 focus:outline-none resize-none"
+                spellCheck={false}
+              />
+            )}
           </div>
         </div>
 
